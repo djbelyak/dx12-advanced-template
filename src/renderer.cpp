@@ -1,18 +1,22 @@
 #include "renderer.h"
 
-#define TINYOBJLOADER_IMPLEMENTATION
-#include "tiny_obj_loader.h"
-
 void Renderer::OnInit()
 {
 	LoadPipeline();
 	LoadAssets();
+
+	base_time = high_resolution_clock::now();
 }
 
 void Renderer::OnUpdate()
 {
-	angle += delta_rotation;
-	eye_position += XMVECTOR({ sin(angle), 0.f, cos(angle) })*delta_forward;
+	high_resolution_clock::time_point current_time = high_resolution_clock::now();
+
+	duration<float> time_passed = duration_cast<duration<float>>(current_time - base_time);
+	base_time = current_time;
+
+	angle += velocity_rotation * time_passed.count();
+	eye_position += XMVECTOR({ sin(angle), 0.f, cos(angle) }) * velocity_forward * time_passed.count();
 
 	XMVECTOR focus_position = eye_position + XMVECTOR({ sin(angle), 0.f, cos(angle) });
 
@@ -22,10 +26,6 @@ void Renderer::OnUpdate()
 		XMMatrixTranspose(projection) *
 		XMMatrixTranspose(view) *
 		XMMatrixTranspose(world));
-	//world_view_projection = XMMatrixTranspose(world * view * projection);
-	//world_view_projection = world * view * projection;
-	//world_view_projection = view * world;
-	//world_view_projection = world;
 	memcpy(constant_buffer_data_begin, &world_view_projection, sizeof(world_view_projection));
 }
 
@@ -52,16 +52,16 @@ void Renderer::OnKeyDown(UINT8 key)
 	switch (key)
 	{
 	case 0x41 - 'a' + 'd':
-		delta_rotation = 0.0001f;
+		velocity_rotation = 1.0f;
 		break;
 	case 0x41 - 'a' + 'a':
-		delta_rotation = -0.0001f;
+		velocity_rotation = -1.0f;
 		break;
 	case 0x41 - 'a' + 'w':
-		delta_forward = 0.001f;
+		velocity_forward = 1.0f;
 		break;
 	case 0x41 - 'a' + 's':
-		delta_forward = -0.001;
+		velocity_forward = -1.0f;
 		break;
 
 	default:
@@ -74,16 +74,16 @@ void Renderer::OnKeyUp(UINT8 key)
 	switch (key)
 	{
 	case 0x41 - 'a' + 'd':
-		delta_rotation = 0.0f;
+		velocity_rotation = 0.0f;
 		break;
 	case 0x41 - 'a' + 'a':
-		delta_rotation = 0.0f;
+		velocity_rotation = 0.0f;
 		break;
 	case 0x41 - 'a' + 'w':
-		delta_forward = 0.0f;
+		velocity_forward = 0.0f;
 		break;
 	case 0x41 - 'a' + 's':
-		delta_forward = 0.0f;
+		velocity_forward = 0.0f;
 		break;
 	default:
 		break;
@@ -226,7 +226,9 @@ void Renderer::LoadAssets()
 	D3D12_INPUT_ELEMENT_DESC input_element_descriptors[] =
 	{
 		{"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-		{"COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0}
+		{"DIFFUSE", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+		{"NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+		{"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 36, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
 	};
 
 	D3D12_GRAPHICS_PIPELINE_STATE_DESC pso_descriptor = {};
@@ -255,76 +257,15 @@ void Renderer::LoadAssets()
 	ThrowIfFailed(command_list->Close());
 
 	// Create and upload vertex buffer
-	std::wstring bin_path = GetBinPath(std::wstring());
-	std::string obj_path(bin_path.begin(), bin_path.end());
-	std::string obj_file = obj_path + "CornellBox-Original.obj";
+	std::wstring obj_file = GetBinPath(model_file);
+	std::string obj_path(obj_file.begin(), obj_file.end());
 
-	tinyobj::attrib_t attrib;
-	std::vector<tinyobj::shape_t> shapes;
-	std::vector<tinyobj::material_t> materials;
-
-	std::string warn;
-	std::string err;
-
-	bool ret = tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, obj_file.c_str(), obj_path.c_str());
-
-	if (!warn.empty()) 
-	{
-		std::wstring wwarn(warn.begin(), warn.end());
-		wwarn = L"Tiny OBJ reader warning: " + wwarn + L"\n";
-		OutputDebugString(wwarn.c_str());
-	}
-
-	if (!err.empty())
-	{
-		std::wstring werr(err.begin(), err.end());
-		werr = L"Tiny OBJ reader error: " + werr + L"\n";
-		OutputDebugString(werr.c_str());
-	}
-
-	if (!ret)
-	{
-		ThrowIfFailed(-1);
-	}
-
-	// Loop over shapes
-	for (size_t s = 0; s < shapes.size(); s++) {
-		// Loop over faces(polygon)
-		size_t index_offset = 0;
-		for (size_t f = 0; f < shapes[s].mesh.num_face_vertices.size(); f++) {
-			int fv = shapes[s].mesh.num_face_vertices[f];
-
-			// Loop over vertices in the face.
-			// per-face material
-			int material_ids = shapes[s].mesh.material_ids[f];
-			for (size_t v = 0; v < fv; v++) {
-				// access to vertex
-				tinyobj::index_t idx = shapes[s].mesh.indices[index_offset + v];
-				tinyobj::real_t vx = attrib.vertices[3 * idx.vertex_index + 0];
-				tinyobj::real_t vy = attrib.vertices[3 * idx.vertex_index + 1];
-				tinyobj::real_t vz = attrib.vertices[3 * idx.vertex_index + 2];
-
-				materials[material_ids].diffuse;
-				ColorVertex vertex = {
-					{vx, vy, vz},
-					{
-						materials[material_ids].diffuse[0],
-						materials[material_ids].diffuse[1],
-						materials[material_ids].diffuse[2],
-						1.0f
-					}
-				};
-				verteces.push_back(vertex);
-			}
-			index_offset += fv;
-		}
-	};
-
-	const UINT vertex_buffer_size = sizeof(ColorVertex) * verteces.size();
+	ThrowIfFailed(model_loader.LoadModel(obj_path));
+	
 	ThrowIfFailed(device->CreateCommittedResource(
 		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
 		D3D12_HEAP_FLAG_NONE,
-		&CD3DX12_RESOURCE_DESC::Buffer(vertex_buffer_size),
+		&CD3DX12_RESOURCE_DESC::Buffer(model_loader.GetVertexBufferSize()),
 		D3D12_RESOURCE_STATE_GENERIC_READ,
 		nullptr,
 		IID_PPV_ARGS(&vertex_buffer)));
@@ -334,12 +275,12 @@ void Renderer::LoadAssets()
 	UINT8* vertex_data_begin;
 	CD3DX12_RANGE read_range(0, 0);
 	ThrowIfFailed(vertex_buffer->Map(0, &read_range, reinterpret_cast<void**>(&vertex_data_begin)));
-	memcpy(vertex_data_begin, verteces.data(), sizeof(ColorVertex) * verteces.size());
+	memcpy(vertex_data_begin, model_loader.GetVertexBuffer(), model_loader.GetVertexBufferSize());
 	vertex_buffer->Unmap(0, nullptr);
 
 	vertex_buffer_view.BufferLocation = vertex_buffer->GetGPUVirtualAddress();
-	vertex_buffer_view.StrideInBytes = sizeof(ColorVertex);
-	vertex_buffer_view.SizeInBytes = vertex_buffer_size;
+	vertex_buffer_view.StrideInBytes = sizeof(FullVertex);
+	vertex_buffer_view.SizeInBytes = model_loader.GetVertexBufferSize();
 
 	// Constant buffer init
 	ThrowIfFailed(device->CreateCommittedResource(
@@ -399,7 +340,7 @@ void Renderer::PopulateCommandList()
 	command_list->ClearRenderTargetView(rtv_handle, clear_color, 0, nullptr);
 	command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 	command_list->IASetVertexBuffers(0, 1, &vertex_buffer_view);
-	command_list->DrawInstanced(verteces.size(), 1, 0, 0);
+	command_list->DrawInstanced(model_loader.GetVertexNum(), 1, 0, 0);
 
 
 	// Resource barrier from RT to present

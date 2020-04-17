@@ -3,11 +3,20 @@
 #include "dx12_labs.h"
 
 #include "win32_window.h"
+#include <model_loader.h>
 
 class Renderer
 {
 public:
-	Renderer(UINT width, UINT height) : width(width), height(height), title(L"DX12 renderer"), frame_index(0), rtv_descriptor_size(0)
+	Renderer(UINT width, UINT height) : 
+		width(width),
+		height(height),
+		title(L"DX12 renderer"),
+		frame_index(0),
+		rtv_descriptor_size(0),
+		model_file(L"CornellBox-Original.obj")
+		//model_file(L"cube.obj")
+		//model_file(L"breakfast_room.obj")
 	{
 		view_port = CD3DX12_VIEWPORT(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height));
 		scissor_rect = CD3DX12_RECT(0, 0, static_cast<LONG>(width), static_cast<LONG>(height));
@@ -15,15 +24,12 @@ public:
 		fence_value = 0;
 		fence_event = nullptr;
 		aspect_ratio = static_cast<float>(width) / static_cast<float>(height);
-		verteces.clear();
 
 		world_view_projection = XMMatrixIdentity();
 		world = XMMatrixTranslation(0, 0, 0) * XMMatrixScaling(1.0, 1.0, 1.0);
 		view = XMMatrixIdentity();
 		eye_position = XMVECTOR({ 0.0f, 1.0f, -5.0f });
-		//projection = XMMatrixIdentity();
 		projection = XMMatrixPerspectiveFovLH(60.f*XM_PI/180.f, aspect_ratio, 0.001f, 100.f);
-		//projection = XMMatrixOrthographicLH(width, height, 0.1f, 10.f);
 	};
 	virtual ~Renderer() {};
 
@@ -63,7 +69,9 @@ protected:
 	CD3DX12_RECT scissor_rect;
 
 	// Resources
-	std::vector<ColorVertex> verteces;
+	std::wstring model_file;
+	ModelLoader model_loader;
+
 	ComPtr<ID3D12Resource> vertex_buffer;
 	D3D12_VERTEX_BUFFER_VIEW vertex_buffer_view;
 
@@ -92,6 +100,8 @@ protected:
 	XMVECTOR eye_position;
 	float angle = 0.f;
 
-	float delta_forward = 0.f;
-	float delta_rotation = 0.f;
+	float velocity_forward = 0.f;
+	float velocity_rotation = 0.f;
+
+	high_resolution_clock::time_point base_time;
 };
